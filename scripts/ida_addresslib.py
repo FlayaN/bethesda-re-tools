@@ -5,6 +5,7 @@ import ida_kernwin
 import ida_nalt
 import struct
 import pickle
+import csv
 
 # Global variable to store the address-ID mappings
 address_to_id = {}
@@ -14,6 +15,7 @@ address_library_loaded = False
 ACTION_CLEARDB = "addresslib:clear"
 ACTION_LOAD_V1 = "addresslib:load_v1"
 ACTION_LOAD_V2 = "addresslib:load_v2"
+ACTION_LOAD_VR = "addresslib:load_vr"
 ACTION_JUMPTO = "addresslib:jumpto"
 
 
@@ -238,6 +240,43 @@ def load_address_library_v2():
         ida_kernwin.msg(f"Loaded Address Library for {moduleName} runtime {verStr}\n")
 
 
+def load_address_library_vr():
+    global id_to_address
+    global address_to_id
+    global address_library_loaded
+
+    file_path = ida_kernwin.ask_file(
+        False, "database.csv", "Select vr Address Library file"
+    )
+    ida_kernwin.msg(f"Loading file {file_path}\n")
+
+    base_address = ida_nalt.get_imagebase()
+
+    if not file_path:
+        return
+
+    with open(file_path, "r") as file:
+        clear_db()
+        csvFile = csv.reader(file)
+        next(csvFile, None)  # skip the header
+        for row in csvFile:
+            offset = int(row[0])
+            address = int(row[2], 16)
+
+            address_offset = address - base_address
+
+            id_to_address[offset] = address_offset
+            address_to_id[address_offset] = offset
+
+            print(
+                f"id: {offset}, vr_address: {hex(address)}, se_address: {hex(int(row[1], 16))}, name: {row[4]}"
+            )
+
+    address_library_loaded = True
+    save_address_library()
+    ida_kernwin.msg(f"Loaded Address Library file {file_path}.\n")
+
+
 def get_id_by_address(address):
     global address_to_id
     global address_library_loaded
@@ -316,6 +355,14 @@ def register_actions():
         "Loads Address Library database version 2",
     )
 
+    load_action_vr_desc = idaapi.action_desc_t(
+        ACTION_LOAD_VR,
+        "Load address library vr (Skyrim, Fallout) ",
+        IDACtxEntry(load_address_library_vr),
+        None,
+        "Loads Address Library database version VR (database.csv)",
+    )
+
     clear_db_action = idaapi.action_desc_t(
         ACTION_CLEARDB,
         "Clear loaded database",
@@ -334,6 +381,7 @@ def register_actions():
 
     idaapi.register_action(load_action_v1_desc)
     idaapi.register_action(load_action_v2_desc)
+    idaapi.register_action(load_action_vr_desc)
     idaapi.register_action(clear_db_action)
     idaapi.register_action(jump_to_id_action_desc)
 
@@ -342,6 +390,9 @@ def register_actions():
     )
     idaapi.attach_action_to_menu(
         "Edit/Address Library/", ACTION_LOAD_V2, idaapi.SETMENU_APP
+    )
+    idaapi.attach_action_to_menu(
+        "Edit/Address Library/", ACTION_LOAD_VR, idaapi.SETMENU_APP
     )
     idaapi.attach_action_to_menu(
         "Edit/Address Library/", ACTION_CLEARDB, idaapi.SETMENU_APP
