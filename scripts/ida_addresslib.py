@@ -11,6 +11,11 @@ address_to_id = {}
 id_to_address = {}
 address_library_loaded = False
 
+ACTION_CLEARDB = "addresslib:clear"
+ACTION_LOAD_V1 = "addresslib:load_v1"
+ACTION_LOAD_V2 = "addresslib:load_v2"
+ACTION_JUMPTO = "addresslib:jumpto"
+
 
 def get_file_path():
     idb_path = ida_nalt.get_input_file_path()
@@ -296,33 +301,33 @@ class AddressLibraryPlugin(idaapi.plugin_t):
 
 def register_actions():
     load_action_v1_desc = idaapi.action_desc_t(
-        "addresslib:load_v1",
+        ACTION_LOAD_V1,
         "Load address library v1 (Fallout 4) ",
-        LoadAddressLibraryActionV1(),
+        IDACtxEntry(load_address_library_v1),
         None,
         "Loads Address Library database version 1",
     )
 
     load_action_v2_desc = idaapi.action_desc_t(
-        "addresslib:load_v2",
+        ACTION_LOAD_V2,
         "Load address library v2 (Skyrim, Starfield) ",
-        LoadAddressLibraryActionV2(),
+        IDACtxEntry(load_address_library_v2),
         None,
         "Loads Address Library database version 2",
     )
 
     clear_db_action = idaapi.action_desc_t(
-        "addresslib:clear",
+        ACTION_CLEARDB,
         "Clear loaded database",
-        ClearDBAction(),
+        IDACtxEntry(clear_db_handler),
         None,
         "Clears any loaded Address Library database",
     )
 
     jump_to_id_action_desc = idaapi.action_desc_t(
-        "addresslib:jumpto",
+        ACTION_JUMPTO,
         "Jump to Address Library ID...",
-        GetIdAction(),
+        IDACtxEntry(get_id_handler),
         None,
         "Gets the ID for the current address",
     )
@@ -333,80 +338,74 @@ def register_actions():
     idaapi.register_action(jump_to_id_action_desc)
 
     idaapi.attach_action_to_menu(
-        "Edit/Address Library/", "addresslib:load_v1", idaapi.SETMENU_APP
+        "Edit/Address Library/", ACTION_LOAD_V1, idaapi.SETMENU_APP
     )
     idaapi.attach_action_to_menu(
-        "Edit/Address Library/", "addresslib:load_v2", idaapi.SETMENU_APP
+        "Edit/Address Library/", ACTION_LOAD_V2, idaapi.SETMENU_APP
     )
     idaapi.attach_action_to_menu(
-        "Edit/Address Library/", "addresslib:clear", idaapi.SETMENU_APP
+        "Edit/Address Library/", ACTION_CLEARDB, idaapi.SETMENU_APP
     )
     idaapi.attach_action_to_menu(
-        "Jump/Jump to file offset...", "addresslib:jumpto", idaapi.SETMENU_APP
+        "Jump/Jump to file offset...", ACTION_JUMPTO, idaapi.SETMENU_APP
     )
 
 
-class LoadAddressLibraryActionV1(idaapi.action_handler_t):
-    def activate(self, ctx):
-        load_address_library_v1()
-        return 1
+def clear_db_handler():
+    global address_library_loaded
 
-    def update(self, ctx):
-        return idaapi.AST_ENABLE_ALWAYS
-
-
-class LoadAddressLibraryActionV2(idaapi.action_handler_t):
-    def activate(self, ctx):
-        load_address_library_v2()
-        return 1
-
-    def update(self, _):
-        return idaapi.AST_ENABLE_ALWAYS
+    if not address_library_loaded:
+        ida_kernwin.warning("No Address Library is loaded.")
+        return
+    clear_db()
+    ida_kernwin.msg("Loaded Address Library database has been cleared.\n")
 
 
-class ClearDBAction(idaapi.action_handler_t):
-    def activate(self, ctx):
-        global address_library_loaded
+def get_id_handler():
+    global address_library_loaded
 
-        if not address_library_loaded:
-            ida_kernwin.warning("No Address Library is loaded.")
-            return
-        clear_db()
-        ida_kernwin.msg("Loaded Address Library database has been cleared.\n")
-        return 1
+    if not address_library_loaded:
+        ida_kernwin.warning("No Address Library is loaded.")
+        return
 
-    def update(self, ctx):
-        return idaapi.AST_ENABLE_ALWAYS
+    current_id = get_id_by_address(idaapi.get_screen_ea())
 
+    result = None
+    if current_id is not None:
+        current_id_str = f"{current_id}"
+        result = ida_kernwin.ask_str(current_id_str, 0, "Enter Address Library ID")
+    else:
+        result = ida_kernwin.ask_str("0", 0, "Enter Address Library ID")
 
-class GetIdAction(idaapi.action_handler_t):
-    def activate(self, ctx):
-        global address_library_loaded
-
-        if not address_library_loaded:
-            ida_kernwin.warning("No Address Library is loaded.")
-            return
-
-        current_id = get_id_by_address(idaapi.get_screen_ea())
-
-        result = None
-        if current_id is not None:
-            current_id_str = f"{current_id}"
-            result = ida_kernwin.ask_str(current_id_str, 0, "Enter Address Library ID")
+    if result is not None:
+        user_id = int(result)
+        address = get_address_by_id(user_id)
+        if address is not None:
+            ida_kernwin.jumpto(address)
         else:
-            result = ida_kernwin.ask_str("0", 0, "Enter Address Library ID")
+            ida_kernwin.warning(f"Invalid ID: {user_id}.")
 
-        if result is not None:
-            user_id = int(result)
-            address = get_address_by_id(user_id)
-            if address is not None:
-                ida_kernwin.jumpto(address)
-            else:
-                ida_kernwin.warning(f"Invalid ID: {user_id}.")
 
+class IDACtxEntry(idaapi.action_handler_t):
+    """
+    A basic Context Menu class to utilize IDA's action handlers.
+    """
+
+    def __init__(self, action_function):
+        idaapi.action_handler_t.__init__(self)
+        self.action_function = action_function
+
+    def activate(self, ctx):
+        """
+        Execute the embedded action_function when this context menu is invoked.
+        """
+        self.action_function()
         return 1
 
     def update(self, ctx):
+        """
+        Ensure the context menu is always available in IDA.
+        """
         return idaapi.AST_ENABLE_ALWAYS
 
 
