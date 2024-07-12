@@ -6,6 +6,8 @@ import ida_nalt
 import struct
 import pickle
 import csv
+import idc
+import idautils
 
 # Global variable to store the address-ID mappings
 address_to_id = {}
@@ -245,6 +247,19 @@ def load_address_library_vr():
     global address_to_id
     global address_library_loaded
 
+    seid_to_aeid = {}
+
+    se_ae_path = ida_kernwin.ask_file(
+        False, "se_ae.csv", "Select se_ae file(from skyrim_vr_address_library)"
+    )
+    ida_kernwin.msg(f"Loading file {se_ae_path}\n")
+
+    with open(se_ae_path, "r") as file:
+        csvFile = csv.reader(file)
+        next(csvFile, None)  # skip the header
+        for row in csvFile:
+            seid_to_aeid[int(row[0])] = int(row[1])
+
     file_path = ida_kernwin.ask_file(
         False, "database.csv", "Select vr Address Library file"
     )
@@ -260,17 +275,45 @@ def load_address_library_vr():
         csvFile = csv.reader(file)
         next(csvFile, None)  # skip the header
         for row in csvFile:
-            offset = int(row[0])
+            seid = int(row[0])
             address = int(row[2], 16)
 
             address_offset = address - base_address
 
-            id_to_address[offset] = address_offset
-            address_to_id[address_offset] = offset
+            id_to_address[seid] = address_offset
+            address_to_id[address_offset] = seid
 
-            print(
-                f"id: {offset}, vr_address: {hex(address)}, se_address: {hex(int(row[1], 16))}, name: {row[4]}"
-            )
+            ae_id = seid_to_aeid.get(seid, None)
+
+            ae_id_msg = ""
+            if ae_id is None:
+                ae_id_msg = "AE ID: Not found in se_ae.csv\n"
+            else:
+                ae_id_msg = f"AE ID: {ae_id}\n"
+
+            print(f"se id: {seid}, address: 0x{(address):X}, name: {row[4]}")
+            cmt = f"SE ID: {seid} ADDR: 0x{int(row[1], 16):X}\n{ae_id_msg}STATUS: {row[3]}\nVR ADDR: 0x{address:X}\n{row[4]}"
+            success = idc.set_func_cmt(address, cmt, 1)
+            if success is not True:
+                idc.set_cmt(address, cmt, False)
+            else:
+                dism_addr = list(idautils.FuncItems(address))
+                for c in range(len(dism_addr)):
+                    instruction_addr = dism_addr[c]
+                    instruction_type = idc.print_insn_mnem(instruction_addr)
+                    if instruction_type == "call" or instruction_type == "jmp":
+                        if ae_id is None:
+                            idc.set_cmt(
+                                instruction_addr,
+                                f"REL::RelocationID({seid}, 0).address() + REL::Relocate(0x0, 0x0, 0x{instruction_addr-address:X})",
+                                False,
+                            )
+                        else:
+                            idc.set_cmt(
+                                instruction_addr,
+                                f"REL::RelocationID({seid}, {ae_id}).address() + REL::Relocate(0x0, 0x0, 0x{instruction_addr-address:X})",
+                                False,
+                            )
 
     address_library_loaded = True
     save_address_library()
